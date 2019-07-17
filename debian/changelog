@@ -1,3 +1,9 @@
+system76-oled (0.1.1) bionic; urgency=medium
+
+  * Update inotify to 0.7.0
+
+ -- Jeremy Soller <jeremy@system76.com>  Wed, 17 Jul 2019 10:28:19 -0600
+
 system76-oled (0.1.0) bionic; urgency=medium
 
   * Initial release.
