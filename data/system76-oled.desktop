@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Encoding=UTF-8
+Name=System76 OLED
+Comment=Control brightness on OLED displays
+Exec=system76-oled
+Terminal=false
+NoDisplay=true
+StartupNotify=false

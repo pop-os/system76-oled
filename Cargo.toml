@@ -1,0 +1,13 @@
+[package]
+name = "system76-oled"
+description = "Control brightness on OLED displays"
+version = "0.1.0"
+repository = "https://github.com/pop-os/system76-oled"
+license = "LGPL-3.0-or-later"
+authors = ["Jeremy Soller <jeremy@system76.com>"]
+edition = "2018"
+
+[dependencies]
+env_logger = "0.6.2"
+inotify = { version = "0.6.1", default-features = false }
+log = "0.4.7"
