@@ -1,3 +1,9 @@
+system76-oled (0.1.3) bionic; urgency=medium
+
+  * Switch to using xlib for performance
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 18 Jul 2019 10:37:36 -0600
+
 system76-oled (0.1.2) bionic; urgency=medium
 
   * Add timeout of one second to ensure sync on resuming from suspend
