@@ -6,7 +6,8 @@ use inotify::{
 use log::{debug, info, trace};
 use std::{fs, process};
 use std::fmt::Write;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Error, Read, Seek, SeekFrom};
+use std::os::unix::io::AsRawFd;
 
 fn main() {
     env_logger::from_env(Env::default().default_filter_or("info")).init();
@@ -110,17 +111,48 @@ fn main() {
                 .expect("failed to run xrandr");
         }
 
-        let mut buffer = [0; 1024];
-        let events = inotify.read_events_blocking(&mut buffer)
-            .expect("failed to read events");
+        // Use poll to establish a timeout
+        let mut pollfd = libc::pollfd {
+            fd: inotify.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let timeout = 1000;
+        trace!(
+            "poll fd: {}, events: {}, revents: {}, timeout: {})",
+            pollfd.fd,
+            pollfd.events,
+            pollfd.revents,
+            timeout
+        );
+        let count = unsafe { libc::poll(&mut pollfd, 1, timeout) };
+        trace!(
+            "poll fd: {}, events: {}, revents: {}, timeout: {} = {}",
+            pollfd.fd,
+            pollfd.events,
+            pollfd.revents,
+            timeout,
+            count
+        );
+        if count < 0 {
+            panic!("failed to poll: {}", Error::last_os_error());
+        } else if count == 0 {
+            // Timed out, update everything
+            requested_update = true;
+            max_update = true;
+        } else {
+            let mut buffer = [0; 1024];
+            let events = inotify.read_events(&mut buffer)
+                .expect("failed to read events");
 
-        for event in events {
-            trace!("event {:?}", event);
-            if event.wd == requested_watch {
-                requested_update = true;
-            }
-            if event.wd == max_watch {
-                max_update = true;
+            for event in events {
+                trace!("event {:?}", event);
+                if event.wd == requested_watch {
+                    requested_update = true;
+                }
+                if event.wd == max_watch {
+                    max_update = true;
+                }
             }
         }
     }

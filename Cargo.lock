@@ -115,10 +115,11 @@ dependencies = [
 
 [[package]]
 name = "system76-oled"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "env_logger 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "inotify 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.60 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

@@ -1,3 +1,9 @@
+system76-oled (0.1.2) bionic; urgency=medium
+
+  * Add timeout of one second to ensure sync on resuming from suspend
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 18 Jul 2019 08:16:00 -0600
+
 system76-oled (0.1.1) bionic; urgency=medium
 
   * Update inotify to 0.7.0
