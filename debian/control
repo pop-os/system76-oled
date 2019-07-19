@@ -5,6 +5,7 @@ Maintainer: Jeremy Soller <jeremy@system76.com>
 Build-Depends:
   debhelper (>=9),
   cargo,
+  libdbus-1-dev,
   libx11-dev,
   libxrandr-dev,
   pkg-config

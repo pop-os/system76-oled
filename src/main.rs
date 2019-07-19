@@ -261,6 +261,9 @@ fn xrandr_output_brightness(display: &mut Display, root_window: &RootWindow, out
 
                                 trace!("set gamma");
                                 display.set_crtc_gamma(&crtc, &gamma);
+
+                                trace!("flush");
+                                display.flush();
                             } else {
                                 error!("failed to get X gamma info");
                             }
@@ -299,24 +302,6 @@ fn main() {
         process::exit(0);
     };
 
-    let mut display = Display::new().expect("failed to open X display");
-    trace!("display {:p}", display.0.as_ptr());
-
-    let mut xrr_event_base = 0;
-    let mut xrr_error_base = 0;
-    if unsafe { xrandr::XRRQueryExtension(display.0.as_ptr(), &mut xrr_event_base, &mut xrr_error_base) } == 0 {
-        panic!("Xrandr extension not found");
-    }
-    trace!("xrr_event_base {:#x}, xrr_error_base {:#x}", xrr_event_base, xrr_error_base);
-
-    let screen_number = display.default_screen_number();
-    trace!("screen_number {:#x}", screen_number.0);
-
-    let root_window = display.root_window(&screen_number);
-    trace!("root_window {:#x}", root_window.0);
-
-    display.select_input(&root_window, xrandr::RROutputChangeNotifyMask);
-
     let mut inotify = Inotify::init()
         .expect("failed to initialize inotify");
 
@@ -336,6 +321,43 @@ fn main() {
     let mut max_file = fs::File::open(max_path)
         .expect("failed to open max brightness");
 
+    let mut display = Display::new().expect("failed to open X display");
+    trace!("display {:p}", display.0.as_ptr());
+
+    let mut xrr_event_base = 0;
+    let mut xrr_error_base = 0;
+    if unsafe { xrandr::XRRQueryExtension(display.0.as_ptr(), &mut xrr_event_base, &mut xrr_error_base) } == 0 {
+        panic!("Xrandr extension not found");
+    }
+    trace!("xrr_event_base {:#x}, xrr_error_base {:#x}", xrr_event_base, xrr_error_base);
+
+    let screen_number = display.default_screen_number();
+    trace!("screen_number {:#x}", screen_number.0);
+
+    let root_window = display.root_window(&screen_number);
+    trace!("root_window {:#x}", root_window.0);
+
+    display.select_input(&root_window, xrandr::RROutputChangeNotifyMask);
+
+    let dbus = dbus::Connection::get_private(dbus::BusType::Session)
+        .expect("failed to connect to D-Bus");
+    dbus.add_match("interface='org.gnome.Mutter.DisplayConfig',member='MonitorsChanged'")
+        .expect("failed to watch D-Bus signal");
+
+    let mut pollfds = vec![libc::pollfd {
+        fd: inotify.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    }, libc::pollfd {
+        fd: display.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    }];
+
+    for watch in dbus.watch_fds() {
+        pollfds.push(watch.to_pollfd());
+    }
+
     let mut requested_update = true;
     let mut requested_str = String::with_capacity(256);
     let mut requested = 0;
@@ -344,30 +366,9 @@ fn main() {
     let mut max = 0;
     let mut current = !0;
 
+    let mut timeout = -1;
+    let mut timeout_times = 0;
     loop {
-        while display.pending() > 0 {
-            unsafe {
-                let mut event = mem::zeroed::<xlib::XEvent>();
-                xlib::XNextEvent(display.0.as_ptr(), &mut event);
-                trace!("event {:#x}", event.type_);
-                if event.type_ >= xrr_event_base {
-                    let xrr_event_type = event.type_ - xrr_event_base;
-                    trace!("xrr_event {:#x}", xrr_event_type);
-                    if xrr_event_type == xrandr::RRNotify {
-                        let notify_event: &xrandr::XRRNotifyEvent = event.as_ref();
-                        trace!("notify_event {:?}", notify_event);
-                        if notify_event.subtype == xrandr::RRNotify_OutputChange {
-                            let output_change_event: &xrandr::XRROutputChangeNotifyEvent = event.as_ref();
-                            trace!("output_change_event {:?}", output_change_event);
-
-                            // If outputs have changed, force a brightness update
-                            current = !0;
-                        }
-                    }
-                }
-            }
-        }
-
         if requested_update {
             requested_str.clear();
             requested_file.seek(SeekFrom::Start(0))
@@ -416,16 +417,9 @@ fn main() {
         }
 
         // Use poll to establish a timeout
-        let mut pollfds = [libc::pollfd {
-            fd: inotify.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        }, libc::pollfd {
-            fd: display.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        }];
-        let timeout = -1; // No timeout
+        for pollfd in pollfds.iter_mut() {
+            pollfd.revents = 0;
+        }
         trace!("poll fds: {}, timeout: {})", pollfds.len(), timeout);
         let count = unsafe {
             libc::poll(pollfds.as_mut_ptr(), pollfds.len() as libc::nfds_t, timeout)
@@ -435,9 +429,15 @@ fn main() {
         if count < 0 {
             panic!("failed to poll: {}", Error::last_os_error());
         } else if count == 0 {
-            panic!("unexpected poll timeout");
+            // Update from timeout
+            current = !0;
+            if timeout_times == 0 {
+                timeout = -1;
+            } else {
+                timeout_times -= 1;
+            }
         } else {
-            if pollfds[0].revents == libc::POLLIN {
+            if pollfds[0].revents > 0 {
                 let mut buffer = [0; 1024];
                 let events = inotify.read_events(&mut buffer)
                     .expect("failed to read events");
@@ -449,6 +449,48 @@ fn main() {
                     }
                     if event.wd == max_watch {
                         max_update = true;
+                    }
+                }
+            }
+
+            if pollfds[1].revents > 0 {
+                while display.pending() > 0 {
+                    unsafe {
+                        let mut event = mem::zeroed::<xlib::XEvent>();
+                        xlib::XNextEvent(display.0.as_ptr(), &mut event);
+                        trace!("event {:#x}", event.type_);
+                        if event.type_ >= xrr_event_base {
+                            let xrr_event_type = event.type_ - xrr_event_base;
+                            trace!("xrr_event {:#x}", xrr_event_type);
+                            if xrr_event_type == xrandr::RRNotify {
+                                let notify_event: &xrandr::XRRNotifyEvent = event.as_ref();
+                                trace!("notify_event {:?}", notify_event);
+                                if notify_event.subtype == xrandr::RRNotify_OutputChange {
+                                    let output_change_event: &xrandr::XRROutputChangeNotifyEvent = event.as_ref();
+                                    trace!("output_change_event {:?}", output_change_event);
+                                }
+
+                                // If crtcs or outputs have changed, force a brightness update every 500 milliseconds for 5 seconds
+                                // TODO: Figure out how GNOME overwrites the gamma, nothing else seems to
+                                current = !0;
+                                // timeout = 100;
+                                // timeout_times = 10;
+                            }
+                        }
+                    }
+                }
+            }
+
+            for pollfd in pollfds[2..].iter() {
+                if pollfd.revents > 0 {
+                    for item in dbus.watch_handle(pollfd.fd, dbus::WatchEvent::from_revents(pollfd.revents)) {
+                        trace!("dbus item {:?}", item);
+
+                        // If crtcs or outputs have changed, force a brightness update every 500 milliseconds for 5 seconds
+                        // TODO: Figure out how GNOME overwrites the gamma, nothing else seems to
+                        current = !0;
+                        timeout = 100;
+                        timeout_times = 10;
                     }
                 }
             }

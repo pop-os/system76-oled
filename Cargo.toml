@@ -8,6 +8,7 @@ authors = ["Jeremy Soller <jeremy@system76.com>"]
 edition = "2018"
 
 [dependencies]
+dbus = "0.6.5"
 env_logger = "0.6.2"
 inotify = { version = "0.7.0", default-features = false }
 libc = "0.2.60"
