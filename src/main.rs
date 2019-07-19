@@ -339,9 +339,18 @@ fn main() {
 
     display.select_input(&root_window, xrandr::RROutputChangeNotifyMask);
 
-    let dbus = dbus::Connection::get_private(dbus::BusType::Session)
-        .expect("failed to connect to D-Bus");
-    dbus.add_match("interface='org.gnome.Mutter.DisplayConfig',member='MonitorsChanged'")
+    let dbus_system = dbus::Connection::get_private(dbus::BusType::System)
+        .expect("failed to connect to D-Bus system bus");
+    dbus_system.add_match("interface='org.freedesktop.ColorManager',member='Changed'")
+        .expect("failed to watch D-Bus signal");
+    dbus_system.add_match("interface='org.freedesktop.ColorManager',member='DeviceChanged'")
+        .expect("failed to watch D-Bus signal");
+    dbus_system.add_match("interface='org.freedesktop.ColorManager',member='ProfileChanged'")
+        .expect("failed to watch D-Bus signal");
+
+    let dbus_session = dbus::Connection::get_private(dbus::BusType::Session)
+        .expect("failed to connect to D-Bus session bus");
+    dbus_session.add_match("interface='org.gnome.Mutter.DisplayConfig',member='MonitorsChanged'")
         .expect("failed to watch D-Bus signal");
 
     let mut pollfds = vec![libc::pollfd {
@@ -354,7 +363,13 @@ fn main() {
         revents: 0,
     }];
 
-    for watch in dbus.watch_fds() {
+    let dbus_system_pollfd = pollfds.len();
+    for watch in dbus_system.watch_fds() {
+        pollfds.push(watch.to_pollfd());
+    }
+
+    let dbus_session_pollfd = pollfds.len();
+    for watch in dbus_session.watch_fds() {
         pollfds.push(watch.to_pollfd());
     }
 
@@ -477,10 +492,25 @@ fn main() {
                 }
             }
 
-            for pollfd in pollfds[2..].iter() {
+            for pollfd in pollfds[dbus_system_pollfd..dbus_session_pollfd].iter() {
                 if pollfd.revents > 0 {
-                    for item in dbus.watch_handle(pollfd.fd, dbus::WatchEvent::from_revents(pollfd.revents)) {
-                        trace!("dbus item {:?}", item);
+                    for item in dbus_system.watch_handle(pollfd.fd, dbus::WatchEvent::from_revents(pollfd.revents)) {
+                        trace!("dbus system item {:?}", item);
+
+                        // Mutter displays have changed, force a brightness update. A timeout is
+                        // used because the gamma changes shortly after receiving this signal
+                        // TODO: Figure out how to avoid mutter setting gamma
+                        current = !0;
+                        timeout = 100;
+                        timeout_times = 10;
+                    }
+                }
+            }
+
+            for pollfd in pollfds[dbus_session_pollfd..].iter() {
+                if pollfd.revents > 0 {
+                    for item in dbus_session.watch_handle(pollfd.fd, dbus::WatchEvent::from_revents(pollfd.revents)) {
+                        trace!("dbus session item {:?}", item);
 
                         // Mutter displays have changed, force a brightness update. A timeout is
                         // used because the gamma changes shortly after receiving this signal
