@@ -5,6 +5,8 @@ Maintainer: Jeremy Soller <jeremy@system76.com>
 Build-Depends:
   debhelper (>=9),
   cargo,
+  libx11-dev,
+  libxrandr-dev,
   pkg-config
 Standards-Version: 4.1.1
 Homepage: https://github.com/pop-os/system76-oled
