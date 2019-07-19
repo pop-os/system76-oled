@@ -4,9 +4,9 @@ use inotify::{
     WatchMask,
 };
 use log::{debug, error, info, trace};
-use std::{fs, process, ptr, slice, str};
+use std::{fs, mem, process, ptr, slice, str};
 use std::io::{Error, Read, Seek, SeekFrom};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::NonNull;
 use x11::{xlib, xrandr};
 
@@ -14,15 +14,109 @@ pub struct ScreenNumber(libc::c_int);
 
 pub struct RootWindow(libc::c_ulong);
 
+pub struct Crtc(xrandr::RRCrtc);
+
+pub struct CrtcGamma(NonNull<xrandr::XRRCrtcGamma>);
+
+impl CrtcGamma {
+    pub fn size(&self) -> libc::c_int {
+        unsafe {
+            self.0.as_ref().size
+        }
+    }
+
+    pub fn channels(&mut self) -> (&mut [libc::c_ushort], &mut [libc::c_ushort], &mut [libc::c_ushort]) {
+        unsafe {
+            (
+                slice::from_raw_parts_mut(
+                    self.0.as_ref().red,
+                    self.0.as_ref().size as usize
+                ),
+                slice::from_raw_parts_mut(
+                    self.0.as_ref().green,
+                    self.0.as_ref().size as usize
+                ),
+                slice::from_raw_parts_mut(
+                    self.0.as_ref().blue,
+                    self.0.as_ref().size as usize
+                ),
+            )
+        }
+    }
+}
+
+impl Drop for CrtcGamma {
+    fn drop(&mut self) {
+        unsafe {
+            xrandr::XRRFreeGamma(self.0.as_ptr());
+        }
+    }
+}
+
+pub struct OutputInfo(NonNull<xrandr::XRROutputInfo>);
+
+impl OutputInfo {
+    pub fn name(&self) -> &[u8] {
+        unsafe {
+            slice::from_raw_parts(
+                self.0.as_ref().name as *const u8,
+                self.0.as_ref().nameLen as usize
+            )
+        }
+    }
+
+    pub fn crtc(&self) -> Option<Crtc> {
+        let crtc = unsafe {
+            self.0.as_ref().crtc
+        };
+        if crtc == 0 {
+            None
+        } else {
+            Some(Crtc(crtc))
+        }
+    }
+}
+
+impl Drop for OutputInfo {
+    fn drop(&mut self) {
+        unsafe {
+            xrandr::XRRFreeOutputInfo(self.0.as_ptr());
+        }
+    }
+}
+
+pub struct Output(xrandr::RROutput);
+
+pub struct OutputsIter<'a> {
+    items: &'a [xrandr::RROutput],
+    i: usize,
+}
+
+impl<'a> Iterator for OutputsIter<'a> {
+    type Item = Output;
+    fn next(&mut self) -> Option<Output> {
+        if let Some(item) = self.items.get(self.i) {
+            self.i += 1;
+            Some(Output(*item))
+        } else {
+            None
+        }
+    }
+}
+
 pub struct ScreenResources(NonNull<xrandr::XRRScreenResources>);
 
 impl ScreenResources {
-    pub fn outputs(&self) -> &[xrandr::RROutput] {
-        unsafe {
+    pub fn outputs(&self) -> OutputsIter {
+        let items = unsafe {
             slice::from_raw_parts(
                 self.0.as_ref().outputs,
                 self.0.as_ref().noutput as usize
             )
+        };
+        OutputsIter {
+            items,
+            i: 0,
         }
     }
 }
@@ -50,13 +144,13 @@ impl Display {
         })
     }
 
-    pub fn root_window(&self, screen_number: ScreenNumber) -> RootWindow {
+    pub fn root_window(&self, screen_number: &ScreenNumber) -> RootWindow {
         RootWindow(unsafe {
             xlib::XRootWindow(self.0.as_ptr(), screen_number.0)
         })
     }
 
-    pub fn get_screen_resources(&self, root_window: RootWindow, current: bool) -> Option<ScreenResources> {
+    pub fn get_screen_resources(&self, root_window: &RootWindow, current: bool) -> Option<ScreenResources> {
         NonNull::new(unsafe {
             if current {
                 xrandr::XRRGetScreenResourcesCurrent(self.0.as_ptr(), root_window.0)
@@ -64,6 +158,50 @@ impl Display {
                 xrandr::XRRGetScreenResources(self.0.as_ptr(), root_window.0)
             }
         }).map(ScreenResources)
+    }
+
+    pub fn get_output_info(&self, resources: &ScreenResources, output: &Output) -> Option<OutputInfo> {
+        NonNull::new(unsafe {
+            xrandr::XRRGetOutputInfo(self.0.as_ptr(), resources.0.as_ptr(), output.0)
+        }).map(OutputInfo)
+    }
+
+    pub fn get_crtc_gamma(&self, crtc: &Crtc) -> Option<CrtcGamma> {
+        NonNull::new(unsafe {
+            xrandr::XRRGetCrtcGamma(self.0.as_ptr(), crtc.0)
+        }).map(CrtcGamma)
+    }
+
+    pub fn set_crtc_gamma(&mut self, crtc: &Crtc, gamma: &CrtcGamma) {
+        unsafe {
+            xrandr::XRRSetCrtcGamma(self.0.as_ptr(), crtc.0, gamma.0.as_ptr());
+        }
+    }
+
+    pub fn select_input(&mut self, root_window: &RootWindow, mask: libc::c_int) {
+        unsafe {
+            xrandr::XRRSelectInput(self.0.as_ptr(), root_window.0, mask);
+        }
+    }
+
+    pub fn flush(&mut self) {
+        unsafe {
+            xlib::XFlush(self.0.as_ptr());
+        }
+    }
+
+    pub fn pending(&self) -> libc::c_int {
+        unsafe {
+            xlib::XPending(self.0.as_ptr())
+        }
+    }
+}
+
+impl AsRawFd for Display {
+    fn as_raw_fd(&self) -> RawFd {
+        unsafe {
+            xlib::XConnectionNumber(self.0.as_ptr())
+        }
     }
 }
 
@@ -75,53 +213,28 @@ impl Drop for Display {
     }
 }
 
-unsafe fn xrandr_output_brightness(output_name: &str, brightness_opt: Option<f64>) {
-    let display = xlib::XOpenDisplay(ptr::null());
-    if ! display.is_null() {
-        trace!("display {:p}", display);
+fn xrandr_output_brightness(display: &mut Display, root_window: &RootWindow, output_name: &str, brightness_opt: Option<f64>) {
+    if let Some(resources) = display.get_screen_resources(&root_window, true) {
+        trace!("resources {:p}", resources.0.as_ptr());
+        for output in resources.outputs() {
+            trace!("output {:#x}", output.0);
+            if let Some(info) = display.get_output_info(&resources, &output) {
+                trace!("info {:p}", info.0.as_ptr());
+                if let Ok(name) = str::from_utf8(info.name()) {
+                    trace!("name {}", name);
+                    if name.starts_with(output_name) {
+                        trace!("matches {}", output_name);
+                        if let Some(crtc) = info.crtc() {
+                            trace!("crtc {:#x}", crtc.0);
+                            if let Some(mut gamma) = display.get_crtc_gamma(&crtc) {
+                                trace!("gamma {:p}", gamma.0.as_ptr());
 
-        let screen = xlib::XDefaultScreen(display);
-        trace!("screen {:#x}", screen);
-
-        let root = xlib::XRootWindow(display, screen);
-        trace!("root {:#x}", root);
-
-        //TODO: Check xrandr version
-
-        let resources = xrandr::XRRGetScreenResourcesCurrent(display, root);
-        if ! resources.is_null() {
-            trace!("resources {:p}", resources);
-
-            for output in slice::from_raw_parts_mut(
-                (*resources).outputs,
-                (*resources).noutput as usize
-            ) {
-                trace!("output {:#x}", output);
-
-                let info = xrandr::XRRGetOutputInfo(display, resources, *output);
-                if ! info.is_null() {
-                    trace!("info {:p}", info);
-
-                    let name_bytes = slice::from_raw_parts(
-                        (*info).name as *const u8,
-                        (*info).nameLen as usize
-                    );
-                    if let Ok(name) = str::from_utf8(name_bytes) {
-                        trace!("name {}", name);
-
-                        if (*info).crtc != 0 && name.starts_with(output_name) {
-                            trace!("crtc {:#x}", (*info).crtc);
-
-                            let gamma = xrandr::XRRGetCrtcGamma(display, (*info).crtc);
-                            if ! gamma.is_null() {
-                                trace!("gamma {:p}", gamma);
-
-                                let size = (*gamma).size;
-
-                                for i in 0..size as usize {
-                                    let r = &mut *(*gamma).red.add(i);
-                                    let g = &mut *(*gamma).green.add(i);
-                                    let b = &mut *(*gamma).blue.add(i);
+                                let size = gamma.size() as usize;
+                                let (red, green, blue) = gamma.channels();
+                                for i in 0..size {
+                                    let r = &mut red[i];
+                                    let g = &mut green[i];
+                                    let b = &mut blue[i];
 
                                     let calulate_value = |gamma_opt: Option<f64>| -> u16 {
                                         // Calculate standard gamma value
@@ -147,29 +260,19 @@ unsafe fn xrandr_output_brightness(output_name: &str, brightness_opt: Option<f64
                                 }
 
                                 trace!("set gamma");
-                                xrandr::XRRSetCrtcGamma(display, (*info).crtc, gamma);
-
-                                xrandr::XRRFreeGamma(gamma);
+                                display.set_crtc_gamma(&crtc, &gamma);
                             } else {
                                 error!("failed to get X gamma info");
                             }
                         }
                     }
-
-                    xrandr::XRRFreeOutputInfo(info);
-                } else {
-                    error!("failed to get X output info");
                 }
+            } else {
+                error!("failed to get X output info");
             }
-
-            xrandr::XRRFreeScreenResources(resources);
-        } else {
-            error!("failed to get X screen resources");
         }
-
-        xlib::XCloseDisplay(display);
     } else {
-        error!("failed to open X display");
+        error!("failed to get X screen resources");
     }
 }
 
@@ -195,6 +298,24 @@ fn main() {
         debug!("Vendor '{}' Model '{}' does not have OLED display", vendor, model);
         process::exit(0);
     };
+
+    let mut display = Display::new().expect("failed to open X display");
+    trace!("display {:p}", display.0.as_ptr());
+
+    let mut xrr_event_base = 0;
+    let mut xrr_error_base = 0;
+    if unsafe { xrandr::XRRQueryExtension(display.0.as_ptr(), &mut xrr_event_base, &mut xrr_error_base) } == 0 {
+        panic!("Xrandr extension not found");
+    }
+    trace!("xrr_event_base {:#x}, xrr_error_base {:#x}", xrr_event_base, xrr_error_base);
+
+    let screen_number = display.default_screen_number();
+    trace!("screen_number {:#x}", screen_number.0);
+
+    let root_window = display.root_window(&screen_number);
+    trace!("root_window {:#x}", root_window.0);
+
+    display.select_input(&root_window, xrandr::RROutputChangeNotifyMask);
 
     let mut inotify = Inotify::init()
         .expect("failed to initialize inotify");
@@ -224,6 +345,29 @@ fn main() {
     let mut current = !0;
 
     loop {
+        while display.pending() > 0 {
+            unsafe {
+                let mut event = mem::zeroed::<xlib::XEvent>();
+                xlib::XNextEvent(display.0.as_ptr(), &mut event);
+                trace!("event {:#x}", event.type_);
+                if event.type_ >= xrr_event_base {
+                    let xrr_event_type = event.type_ - xrr_event_base;
+                    trace!("xrr_event {:#x}", xrr_event_type);
+                    if xrr_event_type == xrandr::RRNotify {
+                        let notify_event: &xrandr::XRRNotifyEvent = event.as_ref();
+                        trace!("notify_event {:?}", notify_event);
+                        if notify_event.subtype == xrandr::RRNotify_OutputChange {
+                            let output_change_event: &xrandr::XRROutputChangeNotifyEvent = event.as_ref();
+                            trace!("output_change_event {:?}", output_change_event);
+
+                            // If outputs have changed, force a brightness update
+                            current = !0;
+                        }
+                    }
+                }
+            }
+        }
+
         if requested_update {
             requested_str.clear();
             requested_file.seek(SeekFrom::Start(0))
@@ -262,59 +406,50 @@ fn main() {
             }
             */
 
+            xrandr_output_brightness(&mut display, &root_window, output, if current == 100 {
+                None
+            } else {
+                Some(current as f64 / 100.0)
+            });
 
-            unsafe {
-                xrandr_output_brightness(output, if current == 100 {
-                    None
-                } else {
-                    Some(current as f64 / 100.0)
-                });
-            }
             debug!("current {}%", current);
         }
 
         // Use poll to establish a timeout
-        let mut pollfd = libc::pollfd {
+        let mut pollfds = [libc::pollfd {
             fd: inotify.as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
+        }, libc::pollfd {
+            fd: display.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        let timeout = -1; // No timeout
+        trace!("poll fds: {}, timeout: {})", pollfds.len(), timeout);
+        let count = unsafe {
+            libc::poll(pollfds.as_mut_ptr(), pollfds.len() as libc::nfds_t, timeout)
         };
-        let timeout = 5000;
-        trace!(
-            "poll fd: {}, events: {}, revents: {}, timeout: {})",
-            pollfd.fd,
-            pollfd.events,
-            pollfd.revents,
-            timeout
-        );
-        let count = unsafe { libc::poll(&mut pollfd, 1, timeout) };
-        trace!(
-            "poll fd: {}, events: {}, revents: {}, timeout: {} = {}",
-            pollfd.fd,
-            pollfd.events,
-            pollfd.revents,
-            timeout,
-            count
-        );
+        trace!("poll fds: {} timeout: {} = {}", pollfds.len(), timeout, count);
+
         if count < 0 {
             panic!("failed to poll: {}", Error::last_os_error());
         } else if count == 0 {
-            // Timed out, update everything
-            requested_update = true;
-            max_update = true;
-            current = !0;
+            panic!("unexpected poll timeout");
         } else {
-            let mut buffer = [0; 1024];
-            let events = inotify.read_events(&mut buffer)
-                .expect("failed to read events");
+            if pollfds[0].revents == libc::POLLIN {
+                let mut buffer = [0; 1024];
+                let events = inotify.read_events(&mut buffer)
+                    .expect("failed to read events");
 
-            for event in events {
-                trace!("event {:?}", event);
-                if event.wd == requested_watch {
-                    requested_update = true;
-                }
-                if event.wd == max_watch {
-                    max_update = true;
+                for event in events {
+                    trace!("event {:?}", event);
+                    if event.wd == requested_watch {
+                        requested_update = true;
+                    }
+                    if event.wd == max_watch {
+                        max_update = true;
+                    }
                 }
             }
         }
