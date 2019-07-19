@@ -1,6 +1,8 @@
 system76-oled (0.1.3) bionic; urgency=medium
 
   * Switch to using xlib for performance
+  * Reapply gamma when outputs change
+  * Work around mutter overriding gamma
 
  -- Jeremy Soller <jeremy@system76.com>  Thu, 18 Jul 2019 10:37:36 -0600
 

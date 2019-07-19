@@ -470,11 +470,7 @@ fn main() {
                                     trace!("output_change_event {:?}", output_change_event);
                                 }
 
-                                // If crtcs or outputs have changed, force a brightness update every 500 milliseconds for 5 seconds
-                                // TODO: Figure out how GNOME overwrites the gamma, nothing else seems to
                                 current = !0;
-                                // timeout = 100;
-                                // timeout_times = 10;
                             }
                         }
                     }
@@ -486,8 +482,9 @@ fn main() {
                     for item in dbus.watch_handle(pollfd.fd, dbus::WatchEvent::from_revents(pollfd.revents)) {
                         trace!("dbus item {:?}", item);
 
-                        // If crtcs or outputs have changed, force a brightness update every 500 milliseconds for 5 seconds
-                        // TODO: Figure out how GNOME overwrites the gamma, nothing else seems to
+                        // Mutter displays have changed, force a brightness update. A timeout is
+                        // used because the gamma changes shortly after receiving this signal
+                        // TODO: Figure out how to avoid mutter setting gamma
                         current = !0;
                         timeout = 100;
                         timeout_times = 10;
