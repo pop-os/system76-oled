@@ -408,24 +408,23 @@ fn main() {
             debug!("max {}", max);
         }
 
-        let next = requested * 100 / max;
-        debug!("next {}%", next);
-        while current != next {
-            current = next;
+        while current != requested {
+            current = requested;
             /* Smooth transition (may require use of xlib for performance)
             if current == !0 {
-                current = next;
-            } else if current < next {
+                current = requested;
+            } else if current < requested {
                 current += 1;
-            } else if current > next {
+            } else if current > requested {
                 current -= 1;
             }
             */
 
-            xrandr_output_brightness(&mut display, &root_window, output, if current == 100 {
+            xrandr_output_brightness(&mut display, &root_window, output, if current == max {
                 None
             } else {
-                Some(current as f64 / 100.0)
+                let ratio = current as f64 / max as f64;
+                Some(ratio * 0.75 + 0.25)
             });
 
             debug!("current {}%", current);
