@@ -424,7 +424,7 @@ fn main() {
                 None
             } else {
                 let ratio = current as f64 / max as f64;
-                Some(ratio * 0.75 + 0.25)
+                Some(ratio * 0.6 + 0.4)
             });
 
             debug!("current {}%", current);
