@@ -294,7 +294,7 @@ fn main() {
         .unwrap_or(String::new());
     let sku = sku.trim();
 
-    let name = fs::read_to_string("/sys/class/dmi/id/product_sku")
+    let name = fs::read_to_string("/sys/class/dmi/id/product_name")
         .unwrap_or(String::new());
     let name = name.trim();
 
