@@ -285,12 +285,22 @@ fn main() {
     let vendor = fs::read_to_string("/sys/class/dmi/id/sys_vendor")
         .unwrap_or(String::new());
     let vendor = vendor.trim();
+
     let model = fs::read_to_string("/sys/class/dmi/id/product_version")
         .unwrap_or(String::new());
     let model = model.trim();
 
-    let output_opt = match (vendor, model) {
-        ("System76", "addw1") => Some("eDP-1"),
+    let sku = fs::read_to_string("/sys/class/dmi/id/product_sku")
+        .unwrap_or(String::new());
+    let sku = sku.trim();
+
+    let name = fs::read_to_string("/sys/class/dmi/id/product_sku")
+        .unwrap_or(String::new());
+    let name = name.trim();
+
+    let output_opt = match (vendor, name, model, sku) {
+        ("System76", _, "addw1", _) => Some("eDP-1"),
+        ("Dell Inc.", "XPS 15 7590", _, "0905") => Some("eDP-1"),
         _ => None,
     };
 
