@@ -291,6 +291,7 @@ fn main() {
 
     let output_opt = match (vendor, model) {
         ("System76", "addw1") => Some("eDP-1"),
+        ("LENOVO", "ThinkPad X1 Yoga 2nd") => Some("eDP1"),
         _ => None,
     };
 
