@@ -9,6 +9,8 @@ use std::io::{Error, Read, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::NonNull;
 use x11::{xlib, xrandr};
+use walkdir::WalkDir;
+use nom::IResult;
 
 pub struct ScreenNumber(libc::c_int);
 
@@ -282,6 +284,32 @@ fn xrandr_output_brightness(display: &mut Display, root_window: &RootWindow, out
 fn main() {
     env_logger::from_env(Env::default().default_filter_or("info")).init();
 
+    let known_oled = [41001];
+
+    for file in WalkDir::new("/sys/class/drm/card0").into_iter().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("edid")) {
+        let mut edid_file = fs::OpenOptions::new().read(true).open(file.path()).unwrap();
+
+        let mut edid_data = Vec::new();
+        edid_file.read_to_end(&mut edid_data).unwrap();
+
+        let edid = match edid::parse(&edid_data) {
+            IResult::Done(_, o) => { o},
+            _ => continue,
+        };
+
+        let product_id = edid.header.product;
+
+        if !known_oled.contains(&product_id) {
+            continue;
+        }
+
+        let display_dir = file.path().parent().unwrap();
+        let card_dir = display_dir.parent().and_then(|e| e.file_name()).and_then(|e| e.to_str()).map(|s| s.len()).unwrap();
+        let name = &display_dir.file_name().unwrap().to_str().unwrap()[card_dir + 1..];
+
+        println!("Found OLED screen: {}", name);
+    }
+
     let vendor = fs::read_to_string("/sys/class/dmi/id/sys_vendor")
         .unwrap_or(String::new());
     let vendor = vendor.trim();
@@ -305,7 +333,7 @@ fn main() {
     };
 
     let output = if let Some(output) = output_opt {
-        info!("Vendor '{}' Model '{}' has OLED display on '{}'", vendor, model, output);
+        info!("Vendor '{}' Name '{}' Model '{}' SKU: '{}'  has OLED display on '{}'", vendor, name, model, sku, output);
         output
     } else {
         debug!("Vendor '{}' Model '{}' does not have OLED display", vendor, model);
@@ -420,7 +448,7 @@ fn main() {
 
         while current != requested {
             current = requested;
-            /* Smooth transition (may require use of xlib for performance)
+            // Smooth transition (may require use of xlib for performance)
             if current == !0 {
                 current = requested;
             } else if current < requested {
@@ -428,7 +456,6 @@ fn main() {
             } else if current > requested {
                 current -= 1;
             }
-            */
 
             xrandr_output_brightness(&mut display, &root_window, output, if current == max {
                 None
