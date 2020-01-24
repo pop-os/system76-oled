@@ -286,8 +286,10 @@ fn main() {
 
     let known_oled = [41001];
 
+    let mut output_opt = None;
+
     for file in WalkDir::new("/sys/class/drm/card0").into_iter().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("edid")) {
-        let mut edid_file = fs::OpenOptions::new().read(true).open(file.path()).unwrap();
+        let mut edid_file = fs::OpenOptions::new().read(true).open(file.clone().path()).unwrap();
 
         let mut edid_data = Vec::new();
         edid_file.read_to_end(&mut edid_data).unwrap();
@@ -308,35 +310,17 @@ fn main() {
         let name = &display_dir.file_name().unwrap().to_str().unwrap()[card_dir + 1..];
 
         println!("Found OLED screen: {}", name);
+
+        output_opt = Some(name.to_string());
     }
 
-    let vendor = fs::read_to_string("/sys/class/dmi/id/sys_vendor")
-        .unwrap_or(String::new());
-    let vendor = vendor.trim();
-
-    let model = fs::read_to_string("/sys/class/dmi/id/product_version")
-        .unwrap_or(String::new());
-    let model = model.trim();
-
-    let sku = fs::read_to_string("/sys/class/dmi/id/product_sku")
-        .unwrap_or(String::new());
-    let sku = sku.trim();
-
-    let name = fs::read_to_string("/sys/class/dmi/id/product_name")
-        .unwrap_or(String::new());
-    let name = name.trim();
-
-    let output_opt = match (vendor, name, model, sku) {
-        ("System76", _, "addw1", _) => Some("eDP-1"),
-        ("Dell Inc.", "XPS 15 7590", _, "0905") => Some("eDP-1"),
-        _ => None,
-    };
-
     let output = if let Some(output) = output_opt {
-        info!("Vendor '{}' Name '{}' Model '{}' SKU: '{}'  has OLED display on '{}'", vendor, name, model, sku, output);
+        // info!("Vendor '{}' Name '{}' Model '{}' SKU: '{}'  has OLED display on '{}'", vendor, name, model, sku, output);
+        println!("Found an OLED display");
         output
     } else {
-        debug!("Vendor '{}' Model '{}' does not have OLED display", vendor, model);
+        // debug!("Vendor '{}' Model '{}' does not have OLED display", vendor, model);
+        println!("Didn't find an OLED display");
         process::exit(0);
     };
 
@@ -457,7 +441,7 @@ fn main() {
                 current -= 1;
             }
 
-            xrandr_output_brightness(&mut display, &root_window, output, if current == max {
+            xrandr_output_brightness(&mut display, &root_window, &output, if current == max {
                 None
             } else {
                 let ratio = current as f64 / max as f64;
