@@ -3,7 +3,7 @@ use inotify::{
     Inotify,
     WatchMask,
 };
-use log::{debug, error, info, trace};
+use log::{debug, error, trace};
 use std::{fs, mem, process, ptr, slice, str};
 use std::io::{Error, Read, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -32,15 +32,15 @@ impl CrtcGamma {
             (
                 slice::from_raw_parts_mut(
                     self.0.as_ref().red,
-                    self.0.as_ref().size as usize
+                    self.0.as_ref().size as usize,
                 ),
                 slice::from_raw_parts_mut(
                     self.0.as_ref().green,
-                    self.0.as_ref().size as usize
+                    self.0.as_ref().size as usize,
                 ),
                 slice::from_raw_parts_mut(
                     self.0.as_ref().blue,
-                    self.0.as_ref().size as usize
+                    self.0.as_ref().size as usize,
                 ),
             )
         }
@@ -62,7 +62,7 @@ impl OutputInfo {
         unsafe {
             slice::from_raw_parts(
                 self.0.as_ref().name as *const u8,
-                self.0.as_ref().nameLen as usize
+                self.0.as_ref().nameLen as usize,
             )
         }
     }
@@ -113,7 +113,7 @@ impl ScreenResources {
         let items = unsafe {
             slice::from_raw_parts(
                 self.0.as_ref().outputs,
-                self.0.as_ref().noutput as usize
+                self.0.as_ref().noutput as usize,
             )
         };
         OutputsIter {
@@ -281,27 +281,41 @@ fn xrandr_output_brightness(display: &mut Display, root_window: &RootWindow, out
     }
 }
 
-fn main() {
+#[derive(PartialEq)]
+struct EDIDInfo {
+    product_id: u16,
+    vendor: [char; 3],
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::from_env(Env::default().default_filter_or("info")).init();
 
-    let known_oled = [41001];
+    let known_oled = [EDIDInfo { product_id: 41001, vendor: ['S', 'D', 'C'] }];
 
     let mut output_opt = None;
 
-    for file in WalkDir::new("/sys/class/drm/card0").into_iter().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("edid")) {
+    let edid_iter = WalkDir::new("/sys/class/drm/card0")
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("edid"));
+
+    for file in edid_iter {
         let mut edid_file = fs::OpenOptions::new().read(true).open(file.clone().path()).unwrap();
 
         let mut edid_data = Vec::new();
         edid_file.read_to_end(&mut edid_data).unwrap();
 
         let edid = match edid::parse(&edid_data) {
-            IResult::Done(_, o) => { o},
+            IResult::Done(_, o) => { o }
             _ => continue,
         };
 
-        let product_id = edid.header.product;
+        let info = EDIDInfo {
+            product_id: edid.header.product,
+            vendor: edid.header.vendor,
+        };
 
-        if !known_oled.contains(&product_id) {
+        if !known_oled.contains(&info) {
             continue;
         }
 
