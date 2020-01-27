@@ -287,7 +287,7 @@ struct EDIDInfo {
     vendor: [char; 3],
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     env_logger::from_env(Env::default().default_filter_or("info")).init();
 
     let known_oled = [EDIDInfo { product_id: 41001, vendor: ['S', 'D', 'C'] }];
@@ -300,10 +300,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("edid"));
 
     for file in edid_iter {
-        let mut edid_file = fs::OpenOptions::new().read(true).open(file.clone().path()).unwrap();
+        let mut edid_file = match fs::OpenOptions::new().read(true).open(file.clone().path()) {
+            Ok(file) => file,
+            _ => continue,
+        };
 
         let mut edid_data = Vec::new();
-        edid_file.read_to_end(&mut edid_data).unwrap();
+        if let Err(_) = edid_file.read_to_end(&mut edid_data) {
+            continue;
+        }
 
         let edid = match edid::parse(&edid_data) {
             IResult::Done(_, o) => { o }
@@ -319,9 +324,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        let display_dir = file.path().parent().unwrap();
-        let card_dir = display_dir.parent().and_then(|e| e.file_name()).and_then(|e| e.to_str()).map(|s| s.len()).unwrap();
-        let name = &display_dir.file_name().unwrap().to_str().unwrap()[card_dir + 1..];
+        let display_dir = match file.path().parent() {
+            Some(dir) => dir,
+            _ => continue,
+        };
+
+        let card_dir = match display_dir.parent().and_then(|e| e.file_name()).and_then(|e| e.to_str()).map(|s| s.len()) {
+            Some(dir) => dir,
+            _ => continue,
+        };
+
+        let name = match display_dir.file_name().unwrap().to_str() {
+            Some(name) => name,
+            _ => continue,
+        };
+
+        let name = &name[card_dir + 1..];
 
         println!("Found OLED screen: {}", name);
 
