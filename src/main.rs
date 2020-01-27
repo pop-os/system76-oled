@@ -334,7 +334,7 @@ fn main() {
             _ => continue,
         };
 
-        let name = match display_dir.file_name().unwrap().to_str() {
+        let name = match display_dir.file_name().and_then(|s| s.to_str()) {
             Some(name) => name,
             _ => continue,
         };
