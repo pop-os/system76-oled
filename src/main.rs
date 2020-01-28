@@ -287,10 +287,10 @@ struct EDIDInfo {
     vendor: [char; 3],
 }
 
+const KNOWN_OLED: &[EDIDInfo] = &[EDIDInfo { product_id: 41001, vendor: ['S', 'D', 'C'] }];
+
 fn main() {
     env_logger::from_env(Env::default().default_filter_or("info")).init();
-
-    let known_oled = [EDIDInfo { product_id: 41001, vendor: ['S', 'D', 'C'] }];
 
     let mut output_opt = None;
 
@@ -320,7 +320,7 @@ fn main() {
             vendor: edid.header.vendor,
         };
 
-        if !known_oled.contains(&info) {
+        if !KNOWN_OLED.contains(&info) {
             continue;
         }
 
