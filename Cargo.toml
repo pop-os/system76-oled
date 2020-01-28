@@ -14,3 +14,6 @@ inotify = { version = "0.7.0", default-features = false }
 libc = "0.2.60"
 log = { version = "0.4.7", features = ["release_max_level_debug"] }
 x11 = { version = "2.18.1", features = ["xlib", "xrandr"] }
+edid = "0.3"
+nom = "3.2"
+walkdir = "2.3"

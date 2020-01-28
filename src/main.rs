@@ -3,12 +3,14 @@ use inotify::{
     Inotify,
     WatchMask,
 };
-use log::{debug, error, info, trace};
+use log::{debug, error, trace};
 use std::{fs, mem, process, ptr, slice, str};
 use std::io::{Error, Read, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::NonNull;
 use x11::{xlib, xrandr};
+use walkdir::WalkDir;
+use nom::IResult;
 
 pub struct ScreenNumber(libc::c_int);
 
@@ -30,15 +32,15 @@ impl CrtcGamma {
             (
                 slice::from_raw_parts_mut(
                     self.0.as_ref().red,
-                    self.0.as_ref().size as usize
+                    self.0.as_ref().size as usize,
                 ),
                 slice::from_raw_parts_mut(
                     self.0.as_ref().green,
-                    self.0.as_ref().size as usize
+                    self.0.as_ref().size as usize,
                 ),
                 slice::from_raw_parts_mut(
                     self.0.as_ref().blue,
-                    self.0.as_ref().size as usize
+                    self.0.as_ref().size as usize,
                 ),
             )
         }
@@ -60,7 +62,7 @@ impl OutputInfo {
         unsafe {
             slice::from_raw_parts(
                 self.0.as_ref().name as *const u8,
-                self.0.as_ref().nameLen as usize
+                self.0.as_ref().nameLen as usize,
             )
         }
     }
@@ -111,7 +113,7 @@ impl ScreenResources {
         let items = unsafe {
             slice::from_raw_parts(
                 self.0.as_ref().outputs,
-                self.0.as_ref().noutput as usize
+                self.0.as_ref().noutput as usize,
             )
         };
         OutputsIter {
@@ -279,26 +281,78 @@ fn xrandr_output_brightness(display: &mut Display, root_window: &RootWindow, out
     }
 }
 
+#[derive(PartialEq)]
+struct EDIDInfo {
+    product_id: u16,
+    vendor: [char; 3],
+}
+
+const KNOWN_OLED: &[EDIDInfo] = &[EDIDInfo { product_id: 41001, vendor: ['S', 'D', 'C'] }];
+
 fn main() {
     env_logger::from_env(Env::default().default_filter_or("info")).init();
 
-    let vendor = fs::read_to_string("/sys/class/dmi/id/sys_vendor")
-        .unwrap_or(String::new());
-    let vendor = vendor.trim();
-    let model = fs::read_to_string("/sys/class/dmi/id/product_version")
-        .unwrap_or(String::new());
-    let model = model.trim();
+    let mut output_opt = None;
 
-    let output_opt = match (vendor, model) {
-        ("System76", "addw1") => Some("eDP-1"),
-        _ => None,
-    };
+    let edid_iter = WalkDir::new("/sys/class/drm/card0")
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("edid"));
+
+    for file in edid_iter {
+        let mut edid_file = match fs::OpenOptions::new().read(true).open(file.clone().path()) {
+            Ok(file) => file,
+            _ => continue,
+        };
+
+        let mut edid_data = Vec::new();
+        if let Err(_) = edid_file.read_to_end(&mut edid_data) {
+            continue;
+        }
+
+        let edid = match edid::parse(&edid_data) {
+            IResult::Done(_, o) => { o }
+            _ => continue,
+        };
+
+        let info = EDIDInfo {
+            product_id: edid.header.product,
+            vendor: edid.header.vendor,
+        };
+
+        if !KNOWN_OLED.contains(&info) {
+            continue;
+        }
+
+        let display_dir = match file.path().parent() {
+            Some(dir) => dir,
+            _ => continue,
+        };
+
+        let card_dir = match display_dir.parent().and_then(|e| e.file_name()).and_then(|e| e.to_str()).map(|s| s.len()) {
+            Some(dir) => dir,
+            _ => continue,
+        };
+
+        let name = match display_dir.file_name().and_then(|s| s.to_str()) {
+            Some(name) => name,
+            _ => continue,
+        };
+
+        let name = &name[card_dir + 1..];
+
+        println!("Found OLED screen: {}", name);
+
+        output_opt = Some(name.to_string());
+    }
 
     let output = if let Some(output) = output_opt {
-        info!("Vendor '{}' Model '{}' has OLED display on '{}'", vendor, model, output);
+        // info!("Vendor '{}' Name '{}' Model '{}' SKU: '{}'  has OLED display on '{}'", vendor, name, model, sku, output);
+        println!("Found an OLED display");
         output
     } else {
-        debug!("Vendor '{}' Model '{}' does not have OLED display", vendor, model);
+        // debug!("Vendor '{}' Model '{}' does not have OLED display", vendor, model);
+        println!("Didn't find an OLED display");
         process::exit(0);
     };
 
@@ -420,7 +474,7 @@ fn main() {
             }
             */
 
-            xrandr_output_brightness(&mut display, &root_window, output, if current == max {
+            xrandr_output_brightness(&mut display, &root_window, &output, if current == max {
                 None
             } else {
                 let ratio = current as f64 / max as f64;
