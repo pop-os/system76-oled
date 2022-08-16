@@ -280,7 +280,7 @@ fn xrandr_output_brightness(display: &mut Display, root_window: &RootWindow, out
 }
 
 fn main() {
-    env_logger::from_env(Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     let vendor = fs::read_to_string("/sys/class/dmi/id/sys_vendor")
         .unwrap_or(String::new());
@@ -340,7 +340,7 @@ fn main() {
 
     display.select_input(&root_window, xrandr::RROutputChangeNotifyMask);
 
-    let dbus_system = dbus::Connection::get_private(dbus::BusType::System)
+    let dbus_system = dbus::ffidisp::Connection::get_private(dbus::ffidisp::BusType::System)
         .expect("failed to connect to D-Bus system bus");
     dbus_system.add_match("interface='org.freedesktop.ColorManager',member='Changed'")
         .expect("failed to watch D-Bus signal");
@@ -349,7 +349,7 @@ fn main() {
     dbus_system.add_match("interface='org.freedesktop.ColorManager',member='ProfileChanged'")
         .expect("failed to watch D-Bus signal");
 
-    let dbus_session = dbus::Connection::get_private(dbus::BusType::Session)
+    let dbus_session = dbus::ffidisp::Connection::get_private(dbus::ffidisp::BusType::Session)
         .expect("failed to connect to D-Bus session bus");
     dbus_session.add_match("interface='org.gnome.Mutter.DisplayConfig',member='MonitorsChanged'")
         .expect("failed to watch D-Bus signal");
@@ -494,7 +494,7 @@ fn main() {
 
             for pollfd in pollfds[dbus_system_pollfd..dbus_session_pollfd].iter() {
                 if pollfd.revents > 0 {
-                    for item in dbus_system.watch_handle(pollfd.fd, dbus::WatchEvent::from_revents(pollfd.revents)) {
+                    for item in dbus_system.watch_handle(pollfd.fd, dbus::ffidisp::WatchEvent::from_revents(pollfd.revents)) {
                         trace!("dbus system item {:?}", item);
 
                         // Mutter displays have changed, force a brightness update. A timeout is
@@ -509,7 +509,7 @@ fn main() {
 
             for pollfd in pollfds[dbus_session_pollfd..].iter() {
                 if pollfd.revents > 0 {
-                    for item in dbus_session.watch_handle(pollfd.fd, dbus::WatchEvent::from_revents(pollfd.revents)) {
+                    for item in dbus_session.watch_handle(pollfd.fd, dbus::ffidisp::WatchEvent::from_revents(pollfd.revents)) {
                         trace!("dbus session item {:?}", item);
 
                         // Mutter displays have changed, force a brightness update. A timeout is

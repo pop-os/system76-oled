@@ -8,9 +8,9 @@ authors = ["Jeremy Soller <jeremy@system76.com>"]
 edition = "2018"
 
 [dependencies]
-dbus = "0.6.5"
-env_logger = "0.6.2"
-inotify = { version = "0.7.0", default-features = false }
-libc = "0.2.60"
-log = { version = "0.4.7", features = ["release_max_level_debug"] }
-x11 = { version = "2.18.1", features = ["xlib", "xrandr"] }
+dbus = "0.9.6"
+env_logger = "0.9.0"
+inotify = { version = "0.10.0", default-features = false }
+libc = "0.2.131"
+log = { version = "0.4.17", features = ["release_max_level_debug"] }
+x11 = { version = "2.20.0", features = ["xlib", "xrandr"] }
