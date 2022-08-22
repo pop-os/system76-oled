@@ -1,3 +1,9 @@
+system76-oled (0.1.5) focal; urgency=medium
+
+  * Add oryp10
+
+ -- Tim Crawford <tcrawford@system76.com>  Mon, 22 Aug 2022 10:42:51 -0600
+
 system76-oled (0.1.4) bionic; urgency=medium
 
   * Add addw2
