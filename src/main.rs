@@ -4,7 +4,7 @@ use inotify::{
     WatchMask,
 };
 use log::{debug, error, info, trace};
-use std::{fs, mem, process, ptr, slice, str};
+use std::{env, fs, mem, process, ptr, slice, str};
 use std::io::{Error, Read, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::NonNull;
@@ -303,6 +303,11 @@ fn main() {
         debug!("Vendor '{}' Model '{}' does not have OLED display", vendor, model);
         process::exit(0);
     };
+
+    if env::var("XDG_CURRENT_DESKTOP") == Ok("pop:GNOME".to_string()) {
+        info!("Pop GNOME session already provides system76-oled");
+        process::exit(0);
+    }
 
     let mut inotify = Inotify::init()
         .expect("failed to initialize inotify");
