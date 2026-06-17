@@ -293,6 +293,7 @@ fn main() {
         ("System76", "addw1") => Some("eDP-1"),
         ("System76", "addw2") => Some("eDP-1"),
         ("System76", "oryp10") => Some("eDP-1"),
+        ("System76", "addp6") => Some("eDP-1"),
         _ => None,
     };
 
